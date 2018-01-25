@@ -1,4 +1,4 @@
-from os import environ, umask
+from os import environ, umask, chdir, mkdir, path
 from subprocess import run
 from threading import Thread, Lock
 
@@ -7,7 +7,55 @@ import mastodon
 Mastodon = mastodon.Mastodon
 from youtube_dl import YoutubeDL
 
-class Queue(object):
+from mpd import MPDClient
+
+class Player(object):
+    def __init__(self):
+        pass
+
+    def add(self, url):
+        raise NotImplemented("Add method not implemented (you probably want to fix this if you want it to do *anything*")
+
+class RadioPlayer(Player):
+    def __init__(self, settings):
+        if "host" not in settings:
+            raise ValueError("player_settings.host parameter is required!")
+        self.host = settings["host"]
+        self.port = settings.setdefault("port", 6600)
+        self.client = MPDClient()
+        self.clientlock = Lock()
+
+    def add_to_client(self, filename):
+        output_file = "{}.mp3".format(filename)
+        run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "panic", "-i", filename, output_file])
+    
+        with self.clientlock:
+            try:
+                self.client.add("file://{}".format(path.abspath(output_file)))
+            except:
+                self.client.connect(self.host, self.port)
+                self.client.add("file://{}".format(path.abspath(output_file)))
+            print("Added {} to queue".format(output_file))
+
+    def ph(self, progress):
+        if progress["status"] == "finished":
+            self.add_to_client(progress["filename"])
+
+    def download(self, url):
+        options = {
+                "format": "mp3/mp4",
+                "progress_hooks": [self.ph],
+                "outtmpl": "./music/%(title)s.%(ext)s"
+            }
+        
+        with YoutubeDL(options) as downloader:
+            downloader.download([url])
+
+    def add(self, url):
+        thread = Thread(target=self.download, args=(url,))
+        thread.start()
+
+class LocalPlayer(object):
     def __init__(self):
         self.lock = Lock()
         self.playing = False
@@ -56,14 +104,28 @@ class Getter(object):
         return self.filename
 
 class StreamListener(mastodon.StreamListener):
-    def __init__(self):
-        self.queue = Queue()
+    players = {
+            "local": LocalPlayer,
+            "radio": RadioPlayer
+            }
+
+    def __init__(self, settings):
+        self.tags = settings.setdefault("tags", ["fediplay"])
+        p = settings.setdefault("player", "local")
+        ps = settings.setdefault("player_settings", {})
+        if p in self.players:
+            self.player = self.players[p](ps)
+        else:
+            print("Unknown player: {}".format(p))
 
     def on_update(self, status):
         tags = extract_tags(status)
-        if 'fediplay' in tags:
-            links = extract_links(status)
-            self.queue.add(links[0])
+        for tag in tags:
+            if tag in self.tags:
+                links = extract_links(status)
+                print("Added {}".format(links[0]))
+                self.player.add(links[0])
+                break
 
 def register(api_base_url):
     old_umask = umask(0o77)
@@ -76,11 +138,15 @@ def login(api_base_url, email, password):
     client.log_in(email, password, to_file='usercred.secret')
     umask(old_umask)
 
-def stream(api_base_url):
+def stream(api_base_url, settings):
     client = Mastodon(client_id='clientcred.secret', access_token='usercred.secret', api_base_url=api_base_url)
-    listener = StreamListener()
+    try: 
+        mkdir("./music") 
+    except: 
+        pass
+    listener = StreamListener(settings)
     print('==> Streaming from', api_base_url)
-    client.stream_user(listener)
+    client.user_stream(listener)
 
 def extract_tags(toot):
     return [tag['name'] for tag in toot['tags']]
@@ -101,10 +167,17 @@ def main():
     from getpass import getpass
     from os import path
     from sys import exit
+    import json
 
-    api_base_url = environ.get('FEDIPLAY_API_BASE_URL')
+    settings = {}
+    with open("settings.json") as fp:
+        settings = json.load(fp)
+
+    api_base_url = settings["api_base_url"]
+    if api_base_url == None:
+        api_base_url = environ.get('FEDIPLAY_API_BASE_URL')
     if not api_base_url:
-        print('FEDIPLAY_API_BASE_URL environment variable not set')
+        print('api_base_url is not in settings nor is the FEDIPLAY_API_BASE_URL environment variable not set')
         exit(1)
 
     if not path.exists('clientcred.secret'):
@@ -117,7 +190,7 @@ def main():
         password = getpass('Password: ')
         login(api_base_url, email, password)
 
-    stream(api_base_url)
+    stream(api_base_url, settings)
 
 if __name__ == '__main__':
     main()

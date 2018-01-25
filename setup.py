@@ -7,7 +7,8 @@ setup(
         'Mastodon.py',
         'cssselect',
         'lxml',
-        'youtube-dl'
+        'youtube-dl',
+        'python-mpd2'
     ],
     entry_points={
         'console_scripts': [

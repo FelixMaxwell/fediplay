@@ -11,6 +11,7 @@ cssselect = "==1.0.1"
 lxml = "==4.1.1"
 "mastodon.py" = "*"
 youtube-dl = "==2017.11.26"
+python-mpd2 = "==0.5.5"
 
 
 [dev-packages]

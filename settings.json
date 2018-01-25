@@ -1,0 +1,12 @@
+{
+	"api_base_url": "https://octodon.social",
+	"tags": [
+		"fediplay",
+		"np",
+		"nowplaying"
+	],
+	"player": "radio",
+	"player_settings": {
+		"host": "/home/jess/mpd/socket"
+	}
+}
